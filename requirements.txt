@@ -9,3 +9,4 @@ openai
 edge-tts
 pyttsx3
 ultralytics
+python-dotenv

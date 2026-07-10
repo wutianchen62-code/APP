@@ -21,6 +21,7 @@ from .hardware import RosmasterHardware, VideoConfig, VideoStreamer
 from .voice import VoicePipeline
 from . import tts
 from .person_tracker import PersonTracker
+from .llm_agent import LLMAgent
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT_DIR / "frontend"
@@ -42,6 +43,7 @@ hardware = RosmasterHardware(debug=os.environ.get("HARDWARE_DEBUG", "0") not in 
 video = VideoStreamer(VIDEO_CONFIG, debug=os.environ.get("VIDEO_DEBUG", "0") not in ("0", "false", "False"))
 voice = VoicePipeline(debug=os.environ.get("VOICE_DEBUG", "0") not in ("0", "false", "False"))
 tracker = PersonTracker(video, hardware, debug=os.environ.get("TRACK_DEBUG", "0") not in ("0", "false", "False"))
+llm_agent = LLMAgent(debug=os.environ.get("LLM_DEBUG", "0") not in ("0", "false", "False"))
 web_app = Flask("rosmaster_web")
 api_app = Flask("rosmaster_api")
 
@@ -52,6 +54,72 @@ def add_common_headers(response):
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+def get_car_state() -> dict:
+    return {
+        "status": hardware.get_status(),
+        "sensors": hardware.get_sensors(),
+        "camera_ok": video.camera_ok,
+        "voice_available": voice.available,
+        "tracking": tracker.active,
+        "detection": tracker.get_detection(),
+    }
+
+
+def execute_llm_action(result: dict) -> dict:
+    action = result.get("action")
+
+    if action == "none":
+        return {"executed": False, "action": "none"}
+
+    if action == "move":
+        cmd = result.get("cmd")
+        speed = result.get("speed") or int(os.environ.get("LLM_DEFAULT_SPEED", "40"))
+        duration = result.get("duration") or float(os.environ.get("LLM_DEFAULT_DURATION", "0.8"))
+
+        if cmd is None:
+            return {"executed": False, "error": "缺少移动指令"}
+
+        hardware.move(cmd, speed)
+
+        def delayed_stop():
+            time.sleep(duration)
+            hardware.stop()
+
+        threading.Thread(target=delayed_stop, name="llm_delayed_stop", daemon=True).start()
+        return {
+            "executed": True,
+            "action": "move",
+            "cmd": cmd,
+            "speed": speed,
+            "duration": duration,
+        }
+
+    if action == "stop":
+        hardware.stop()
+        return {"executed": True, "action": "stop"}
+
+    if action == "light":
+        on = bool(result.get("light_on"))
+        hardware.set_light(on)
+        return {"executed": True, "action": "light", "on": on}
+
+    if action == "beep":
+        hardware.beep(100)
+        return {"executed": True, "action": "beep"}
+
+    if action == "track_start":
+        if not video.camera_ok:
+            return {"executed": False, "error": "摄像头不可用"}
+        tracker.start()
+        return {"executed": True, "action": "track_start"}
+
+    if action == "track_stop":
+        tracker.stop()
+        return {"executed": True, "action": "track_stop"}
+
+    return {"executed": False, "error": f"未知动作: {action}"}
 
 
 web_app.after_request(add_common_headers)
@@ -97,6 +165,7 @@ def api_status():
     data = hardware.get_status()
     data["camera_ok"] = video.camera_ok
     data["voice_available"] = voice.available
+    data["llm_available"] = llm_agent.available
     data["tracking"] = tracker.active
     data["video"] = {
         "device": VIDEO_CONFIG.device,
@@ -155,20 +224,60 @@ def api_beep():
 
 @api_app.route("/api/voice", methods=["POST"])
 def api_voice():
-    """语音指令：录音 → ASR → 解析 → 执行。"""
+    """语音交互：录音 → ASR → 大模型理解 → 执行/对话 → TTS 回复。"""
     try:
         parsed = voice.transcribe()
-        # TTS 异步播报识别结果
-        if parsed.get("text"):
-            tts.speak(parsed["text"], blocking=False)
-        if parsed.get("action"):
-            exec_result = voice.execute_command(parsed, hardware)
-            return jsonify({"ok": True, **parsed, "exec": exec_result})
-        return jsonify(parsed)
+        if not parsed.get("text"):
+            return jsonify(parsed)
+
+        user_text = parsed["text"]
+        llm_result = llm_agent.ask(user_text, car_state=get_car_state())
+        exec_result = execute_llm_action(llm_result)
+        reply = llm_result.get("reply") or "好的。"
+        tts.speak(reply, blocking=False)
+
+        return jsonify({
+            "ok": True,
+            "text": user_text,
+            "llm": llm_result,
+            "exec": exec_result,
+            "reply": reply,
+        })
     except Exception as exc:
         import traceback
         traceback.print_exc()
-        return jsonify({"ok": False, "error": str(exc), "text": None, "action": None, "param": None})
+        tts.speak("处理失败，请稍后再试。", blocking=False)
+        return jsonify({"ok": False, "error": str(exc), "text": None, "reply": None}), 500
+
+
+@api_app.route("/api/chat", methods=["POST"])
+def api_chat():
+    """文本交互入口，便于先调试大模型和小车指令。"""
+    try:
+        body = request.get_json(silent=True) or {}
+        text = str(body.get("text", "")).strip()
+        if not text:
+            return jsonify({"ok": False, "error": "text 不能为空"}), 400
+
+        llm_result = llm_agent.ask(text, car_state=get_car_state())
+        exec_result = execute_llm_action(llm_result)
+        reply = llm_result.get("reply") or "好的。"
+
+        if body.get("speak", True):
+            tts.speak(reply, blocking=False)
+
+        return jsonify({
+            "ok": True,
+            "text": text,
+            "llm": llm_result,
+            "exec": exec_result,
+            "reply": reply,
+        })
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        tts.speak("处理失败，请稍后再试。", blocking=False)
+        return jsonify({"ok": False, "error": str(exc), "text": None, "reply": None}), 500
 
 
 @api_app.route("/api/track/start", methods=["POST"])
@@ -231,6 +340,7 @@ def main():
         f"quality={VIDEO_CONFIG.quality}"
     )
     print(f"Voice : {'可用' if voice.available else '不可用'} (backend={voice.backend})")
+    print(f"LLM   : {'可用' if llm_agent.available else '未配置/不可用'}")
 
     api_thread = threading.Thread(
         target=_run_api, name="api_http", daemon=True,
