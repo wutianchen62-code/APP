@@ -1,0 +1,11 @@
+flask
+gevent
+opencv-python
+pyserial
+sounddevice
+numpy
+openai-whisper
+openai
+edge-tts
+pyttsx3
+ultralytics

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rosmaster 控制台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Rosmaster Web Console</p>
+        <h1>小车控制台</h1>
+      </div>
+      <div class="connection" id="connection">连接中</div>
+    </header>
+
+    <section class="grid">
+      <article class="card video-card">
+        <div class="card-title">
+          <span>实时视频</span>
+          <small id="videoMeta">--</small>
+        </div>
+        <div class="video-wrap">
+          <img id="video" src="/video_feed" alt="视频流">
+        </div>
+        <div class="stats">
+          <div><span>温度</span><strong id="temp">--</strong></div>
+          <div><span>湿度</span><strong id="humidity">--</strong></div>
+          <div><span>电压</span><strong id="battery">--</strong></div>
+        </div>
+      </article>
+
+      <article class="card control-card">
+        <div class="card-title"><span>方向控制</span><small>按住移动，松开停止</small></div>
+        <div class="dpad">
+          <div></div>
+          <button type="button" data-cmd="1" aria-label="前进">▲</button>
+          <div></div>
+          <button type="button" data-cmd="3" aria-label="左转">◄</button>
+          <button type="button" data-cmd="0" aria-label="停止">■</button>
+          <button type="button" data-cmd="4" aria-label="右转">►</button>
+          <div></div>
+          <button type="button" data-cmd="2" aria-label="后退">▼</button>
+          <div></div>
+        </div>
+
+        <label class="speed-row">
+          <span>速度</span>
+          <input type="range" id="speed" min="10" max="100" value="50">
+          <strong id="speedVal">50</strong>
+        </label>
+
+        <div class="section">旋转</div>
+        <div class="actions two">
+          <button type="button" data-cmd="5">↺ 左旋</button>
+          <button type="button" data-cmd="6">↻ 右旋</button>
+        </div>
+
+        <div class="section">语音控制</div>
+        <div class="voice-area">
+          <button type="button" id="btnVoice" class="voice-btn">🎤 按住说话</button>
+          <div class="voice-result" id="voiceResult"></div>
+        </div>
+
+        <div class="section">人物追踪</div>
+        <button type="button" id="btnTrack" class="track-btn">🎯 启动人物追踪</button>
+        <div class="voice-result" id="trackResult"></div>
+
+        <div class="section">设备</div>
+        <div class="actions two">
+          <button type="button" id="btnLight" class="light">车灯 关</button>
+          <button type="button" id="btnBeep" class="beep">蜂鸣测试</button>
+        </div>
+        <button type="button" id="btnStop" class="danger">紧急停止</button>
+        <div class="status" id="status">等待连接...</div>
+      </article>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
