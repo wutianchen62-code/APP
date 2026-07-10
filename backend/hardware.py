@@ -176,6 +176,7 @@ class VideoStreamer:
 
 
 class RosmasterHardware:
+    
     CMD_STOP = 0
     CMD_FORWARD = 1
     CMD_BACKWARD = 2
